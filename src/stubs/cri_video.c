@@ -65,6 +65,7 @@ struct CriVideoStream {
 
 static pthread_mutex_t g_vpx_init_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_vpx_loaded = 0;
+static int g_vpx_abi_ver = 0;
 static void *(*p_vp9_dx)(void) = NULL;
 static int (*p_dec_init_ver)(void *, void *, const void *, long, int) = NULL;
 static int (*p_dec_decode)(void *, const uint8_t *, unsigned int, void *, long) = NULL;
@@ -87,7 +88,12 @@ int cri_video_global_init(void) {
         static const char *const vpx_candidates[] = {
             "libvpx.so.9",
             "/usr/lib64/libvpx.so.9",
+            "libvpx.so.12",
+            "/usr/lib64/libvpx.so.12",
+            "libvpx.so.11",
+            "/usr/lib64/libvpx.so.11",
             "libvpx.so.10",
+            "/usr/lib64/libvpx.so.10",
             "libvpx.so.8",
             "libvpx.so.7",
             "libvpx.so",
@@ -173,10 +179,26 @@ static int reset_vpx_decoder(CriVideoStream *vs) {
         p_dec_destroy(vs->vpx_ctx);
         vs->vpx_inited = 0;
     }
-    memset(vs->vpx_ctx, 0, sizeof(vs->vpx_ctx));
     vpx_dec_cfg_t cfg = { 2, 0, 0 };
-    if (p_dec_init_ver(vs->vpx_ctx, p_vp9_dx(), &cfg, 0, 12) != 0) {
-        return -1;
+    void *iface = p_vp9_dx();
+    int ver = g_vpx_abi_ver;
+    if (ver > 0) {
+        memset(vs->vpx_ctx, 0, sizeof(vs->vpx_ctx));
+        if (p_dec_init_ver(vs->vpx_ctx, iface, &cfg, 0, ver) != 0) {
+            return -1;
+        }
+    } else {
+        static const int abi_candidates[] = { 12, 13, 14, 15, 16, 11, 10, 0 };
+        int ok = 0;
+        for (int i = 0; abi_candidates[i] != 0; i++) {
+            memset(vs->vpx_ctx, 0, sizeof(vs->vpx_ctx));
+            if (p_dec_init_ver(vs->vpx_ctx, iface, &cfg, 0, abi_candidates[i]) == 0) {
+                g_vpx_abi_ver = abi_candidates[i];
+                ok = 1;
+                break;
+            }
+        }
+        if (!ok) return -1;
     }
     vs->vpx_inited = 1;
     vs->cur_frame = -1;

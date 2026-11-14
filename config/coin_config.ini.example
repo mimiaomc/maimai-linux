@@ -1,0 +1,14 @@
+# maimai DX Linux 投币与点数配置文件
+# 复制为游戏根目录下的 coin_config.ini 后按需修改
+
+# 当前持有的币数（按投币键会自动累加并保存，扣点会自动扣除）
+coins = 0
+
+# 投多少币兑换 1 点数 (Credit)
+coins_per_credit = 1
+
+# 投币按键（仅在游戏窗口聚焦时生效；支持 0-9 / A-Z / F1-F12 / Insert / Space / Return / Keypad0-9 / None）
+coin_key = 5
+
+# 是否开启免费游玩模式 (true / false)
+free_play = false

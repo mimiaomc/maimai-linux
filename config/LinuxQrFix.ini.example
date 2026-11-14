@@ -1,0 +1,18 @@
+# LinuxQrFix Linux 硬件端口配置（位于游戏根目录 LinuxQrFix.ini，修改后重启游戏生效）
+# 串口留空表示不映射该 COM 口；Hid1P/Hid2P 留空或写 auto 表示自动探测，写 none 表示禁用。
+# 注意：如果希望仅保留 2e3c:5750 的防掉线保活（不接管 AquaMai 的 AdxHidInput），仍可在下面留空或配合 udev 规则使用；
+# 若同时启用游戏内串口，请确保当前用户在 dialout 组或已配置 /etc/udev/rules.d/99-maimai-controller.rules 权限。
+
+[Serial]
+# 1P / 2P 触摸屏串口设备（对应游戏内 COM3 / COM4）
+Touch1P=/dev/ttyUSB_at32
+Touch2P=
+
+# 1P / 2P 灯板串口设备（对应游戏内 COM21 / COM23）
+Led1P=/dev/ttyUSB_ch340
+Led2P=
+
+[Hid]
+# 1P / 2P 手台按键 HID 设备
+Hid1P=/dev/hidraw_maimai
+Hid2P=

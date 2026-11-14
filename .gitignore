@@ -1,0 +1,18 @@
+# Build outputs
+/build/
+*.o
+*.so
+*.dll
+*.pdb
+*.orig
+
+# User runtime configs & secrets (use *.example templates instead)
+config/net_config.ini
+config/coin_config.ini
+config/LinuxQrFix.ini
+
+# Logs and temporary files
+*.log
+__pycache__/
+*.py[cod]
+.DS_Store

@@ -1,0 +1,34 @@
+# maimai DX Linux 联网与机台配置文件
+# 复制为游戏根目录下的 net_config.ini 后按需修改
+
+# 要连接的 ALL.Net 服务器域名、IP 或完整 URL
+# 示例:
+#   at.sys-allnet.cn                        (国服加密接口 https://at.sys-allnet.cn/net/initialize)
+#   192.168.1.50:8080                       (私服标准接口 http://<地址>/sys/servlet/PowerOn)
+#   https://example.com/net/initialize      (完整指定接口 URL)
+server = at.sys-allnet.cn
+
+# 协议模式: auto / lite / poweron
+#   auto    = 根据 server 自动选择（sys-allnet 域名或包含 /net/initialize 走 lite，其余先试 poweron 再试 lite）
+#   lite    = 强制使用国服 / alAbEx_lite AES 加密接口 (/net/initialize)
+#   poweron = 强制使用标准 ALL.Net PowerOn 接口 (/sys/servlet/PowerOn)
+protocol = auto
+
+# 机台号 / 加密狗 ID (Keychip ID)，支持 16 位带连字符格式或 11 位短格式，请替换为你的有效 Keychip
+keychip_id = A63E-01E00000000
+
+# 基板号 (Board ID)，通常与机台号一致即可
+board_id = A63E-01E00000000
+
+# 游戏 ID 与版本号
+game_id = SDGB
+title_ver = 1.56
+
+# 区域代码: 1 = Japan, 2 = China, 3 = Export
+region_code = 2
+
+# 是否校验 HTTPS 服务器证书 (true / false；部分私服或自签名证书需设为 false)
+ssl_verify = false
+
+# 联网请求超时时间（秒）
+timeout_sec = 5

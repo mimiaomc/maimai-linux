@@ -1,0 +1,12 @@
+# maimai DX 控制器 udev 规则（安装到 /etc/udev/rules.d/99-maimai-controller.rules）
+# 1. 自动将 AT32 USB 复合串口设备 (2e3c:5750) 绑定到 usbserial_generic，生成 /dev/ttyUSB*
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="2e3c", ATTR{idProduct}=="5750", RUN+="/bin/sh -c 'echo 2e3c 5750 > /sys/bus/usb-serial/drivers/generic/new_id 2>/dev/null || true'"
+
+# 2. 为 CH340 (灯板常见串口芯片 1a86:7523) 创建固定软链接与读写权限
+ACTION=="add", SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", MODE="0666", SYMLINK+="ttyUSB_ch340"
+
+# 3. 为 AT32 (触摸/手台主控 2e3c:5750) 创建固定串口软链接与读写权限
+ACTION=="add", SUBSYSTEM=="tty", KERNEL=="ttyUSB*", ATTRS{idVendor}=="2e3c", ATTRS{idProduct}=="5750", MODE="0666", SYMLINK+="ttyUSB_at32"
+
+# 4. 为 AT32 HID 按键接口创建固定 hidraw 软链接与读写权限（兼容 1P 手台按键与防重置保活）
+ACTION=="add", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2e3c", ATTRS{idProduct}=="5750", MODE="0666", SYMLINK+="hidraw_maimai"

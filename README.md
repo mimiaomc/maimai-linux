@@ -18,6 +18,7 @@ maimai-linux/
 │   ├── net_config.ini.example            # ALL.Net 联网与机台号配置模板
 │   ├── coin_config.ini.example           # 投币按键与免费游玩配置模板
 │   ├── LinuxQrFix.ini.example            # 1P/2P 触摸串口、灯板串口与手台 HID 端口配置模板
+│   ├── audio_config.ini.example          # 4 组立体声输出设备 (1P/2P 扬声器与耳机) 路由配置模板
 │   ├── mono_config                       # Mono DLL 映射表 (-> Sinmai_Data/MonoBleedingEdge/etc/mono/config)
 │   └── udev/
 │       └── 99-maimai-controller.rules    # 触摸屏 / 手台 / 灯板串口与 hidraw udev 规则
@@ -130,7 +131,7 @@ bash ./scripts/install.sh \
 - 为将被修改的 `unity default resources`、`unity_builtin_extra`、`globalgamemanagers.assets`、`resources.assets` 与 `mono/config` 创建 `.orig` 备份（仅当 `.orig` 尚不存在时）；
 - 对官方 `LinuxPlayer` 打上 `-force-glcore` 补丁生成 `<GAME_DIR>/Sinmai.x86_64` 并复制对应 Unity Linux 运行库；
 - 安装所有 `lib*.so`、`config/mono_config`、`Mods/LinuxQrFix.dll` 与 `<GAME_DIR>/run_game.sh`（自动赋予可执行权限）；
-- 仅在配置文件不存在时初始化 `<GAME_DIR>/net_config.ini`、`coin_config.ini` 与 `LinuxQrFix.ini`（避免覆盖已有配置）；
+- 仅在配置文件不存在时初始化 `<GAME_DIR>/net_config.ini`、`coin_config.ini`、`LinuxQrFix.ini` 与 `audio_config.ini`（避免覆盖已有配置）；
 - 调用 `tools/patch_game.py` 转译全部游戏着色器。
 
 > 如果此前已经部署过 Unity Linux 运行库和 Shader，后续仅重新编译覆盖插件/Mod 时可直接运行 `bash ./scripts/install.sh /path/to/SDGB`（或 `make install GAME_DIR=/path/to/SDGB`）。
@@ -192,6 +193,17 @@ Hid2P=
 - `coins_per_credit`：每点数所需币数
 - `coin_key`：游戏窗口聚焦时生效的投币按键（如 `5`、`Insert`、`Space` 等）
 - `free_play`：`true` / `false`
+
+### 5. 音频输出路由配置：`<GAME_DIR>/audio_config.ini`
+
+游戏内部原本使用 4 组立体声总线（共 8 声道），可通过 `[Devices]` 段将每组独立映射到 PulseAudio / PipeWire 输出设备（`pactl list short sinks` 第二列）：
+
+- `speaker_1p`：1P 头顶扬声器 L/R（默认 `default`）
+- `speaker_2p`：2P 头顶扬声器 L/R（默认 `default`）
+- `headphone_1p`：1P 耳机孔 L/R（默认 `none`）
+- `headphone_2p`：2P 耳机孔 L/R（默认 `none`）
+
+设为 `default`（或留空）使用系统默认设备，设为 `none`（或 `off` / `disabled`）静音该总线；指向同一设备的总线会自动合并为同一条立体声输出流。
 
 ---
 

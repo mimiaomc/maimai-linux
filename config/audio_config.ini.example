@@ -1,0 +1,24 @@
+; maimai-linux 多声道立体声输出路由配置
+; 放置于游戏根目录 (<GAME_DIR>/audio_config.ini)
+;
+; 游戏原本有 4 组立体声总线 (共 8 声道):
+;   speaker_1p   : 1P 头顶扬声器 (L/R)
+;   speaker_2p   : 2P 头顶扬声器 (L/R)
+;   headphone_1p : 1P 耳机孔 (L/R)
+;   headphone_2p : 2P 耳机孔 (L/R)
+;
+; 可选值:
+;   default  - 使用系统默认 PulseAudio / PipeWire 输出设备 (等同于留空)
+;   none     - 静音 / 禁用该组输出 (也支持 off / disabled)
+;   <名称>   - 指定 PulseAudio / PipeWire sink 名称
+;              可通过命令 `pactl list short sinks` 查看第二列设备名
+;
+; 注意:
+;   指向同一个设备的多个总线会自动合并为一条立体声输出流，不会重复打开设备。
+;   例如默认配置下 speaker_1p 和 speaker_2p 均输出到 default，仅打开一条默认立体声流。
+
+[Devices]
+speaker_1p = default
+speaker_2p = default
+headphone_1p = none
+headphone_2p = none

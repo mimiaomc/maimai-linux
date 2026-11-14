@@ -587,7 +587,7 @@ typedef struct {
     int loop_enabled;
 
     /* Gain & envelope */
-    float gain_l, gain_r;
+    float bus_gain[4];      /* 0=Spk1P, 1=Spk2P, 2=Hp1P, 3=Hp2P */
     float cue_gain;
     int n_cats;
     uint32_t cat_ids[4];
@@ -669,6 +669,93 @@ static uint32_t g_next_pb_id = 1;
 static pthread_t g_mix_thread;
 static int g_mix_running = 0;
 
+#define AUDIO_BUS_SPK_1P 0
+#define AUDIO_BUS_SPK_2P 1
+#define AUDIO_BUS_HP_1P  2
+#define AUDIO_BUS_HP_2P  3
+#define MAX_AUDIO_SINKS  4
+
+static int g_audio_cfg_loaded = 0;
+static int g_bus_sink_idx[4] = { 0, 0, -1, -1 };
+static char g_sink_devs[MAX_AUDIO_SINKS][256];
+static int g_num_sinks = 1;
+
+static void trim_ws(char *s) {
+    char *p = s;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+    if (p != s) memmove(s, p, strlen(p) + 1);
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' || s[len - 1] == '\r' || s[len - 1] == '\n')) {
+        s[--len] = '\0';
+    }
+}
+
+static int resolve_sink_slot(const char *val) {
+    if (!val || !val[0] || strcasecmp(val, "default") == 0) {
+        val = "";
+    } else if (strcasecmp(val, "none") == 0 || strcasecmp(val, "off") == 0 || strcasecmp(val, "disabled") == 0) {
+        return -1;
+    }
+    for (int i = 0; i < g_num_sinks; i++) {
+        if (strcmp(g_sink_devs[i], val) == 0) return i;
+    }
+    if (g_num_sinks >= MAX_AUDIO_SINKS) return -1;
+    snprintf(g_sink_devs[g_num_sinks], sizeof(g_sink_devs[0]), "%.255s", val);
+    return g_num_sinks++;
+}
+
+static void load_audio_config_once(void) {
+    if (g_audio_cfg_loaded) return;
+    g_audio_cfg_loaded = 1;
+
+    char bus_vals[4][256];
+    snprintf(bus_vals[AUDIO_BUS_SPK_1P], sizeof(bus_vals[0]), "default");
+    snprintf(bus_vals[AUDIO_BUS_SPK_2P], sizeof(bus_vals[0]), "default");
+    snprintf(bus_vals[AUDIO_BUS_HP_1P],  sizeof(bus_vals[0]), "none");
+    snprintf(bus_vals[AUDIO_BUS_HP_2P],  sizeof(bus_vals[0]), "none");
+
+    char cfg_path[1056] = "audio_config.ini";
+    char exe_path[1024];
+    ssize_t elen = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (elen > 0) {
+        exe_path[elen] = '\0';
+        char *slash = strrchr(exe_path, '/');
+        if (slash) {
+            *slash = '\0';
+            snprintf(cfg_path, sizeof(cfg_path), "%s/audio_config.ini", exe_path);
+        }
+    }
+
+    FILE *fp = fopen(cfg_path, "r");
+    if (fp) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            trim_ws(line);
+            if (!line[0] || line[0] == '#' || line[0] == ';' || line[0] == '[') continue;
+            char *eq = strchr(line, '=');
+            if (!eq) continue;
+            *eq = '\0';
+            char *key = line;
+            char *val = eq + 1;
+            trim_ws(key);
+            trim_ws(val);
+            if (strcasecmp(key, "speaker_1p") == 0) snprintf(bus_vals[0], sizeof(bus_vals[0]), "%s", val);
+            else if (strcasecmp(key, "speaker_2p") == 0) snprintf(bus_vals[1], sizeof(bus_vals[1]), "%s", val);
+            else if (strcasecmp(key, "headphone_1p") == 0) snprintf(bus_vals[2], sizeof(bus_vals[2]), "%s", val);
+            else if (strcasecmp(key, "headphone_2p") == 0) snprintf(bus_vals[3], sizeof(bus_vals[3]), "%s", val);
+        }
+        fclose(fp);
+        fprintf(stderr, "[CriAudio] Loaded %s: spk1p=%s spk2p=%s hp1p=%s hp2p=%s\n",
+                cfg_path, bus_vals[0], bus_vals[1], bus_vals[2], bus_vals[3]);
+    }
+
+    g_num_sinks = 0;
+    memset(g_sink_devs, 0, sizeof(g_sink_devs));
+    for (int b = 0; b < 4; b++) {
+        g_bus_sink_idx[b] = resolve_sink_slot(bus_vals[b]);
+    }
+}
+
 static float acf_get_cat_effective_gain(uint32_t id) {
     for (int i = 0; i < MAX_CATEGORIES; i++) {
         if (g_cats[i].used && g_cats[i].id == id) {
@@ -683,29 +770,31 @@ static float acf_get_cat_effective_gain(uint32_t id) {
     return 1.0f;
 }
 
-static void compute_player_gains(const cri_player_t *p, float *out_l, float *out_r) {
+static void compute_player_bus_gains(const cri_player_t *p, float out_bus[4]) {
     float g4 = p->aisac_set[4] ? p->aisac[4] : 1.0f;
     float g5 = p->aisac_set[5] ? p->aisac[5] : 1.0f;
     float g2 = p->aisac_set[2] ? p->aisac[2] : 0.0f;
     float g3 = p->aisac_set[3] ? p->aisac[3] : 0.0f;
-    float l = p->volume * (g4 > g2 ? g4 : g2);
-    float r = p->volume * (g5 > g3 ? g5 : g3);
-    if (l < 0.0f) l = 0.0f; else if (l > 2.0f) l = 2.0f;
-    if (r < 0.0f) r = 0.0f; else if (r > 2.0f) r = 2.0f;
-    *out_l = l;
-    *out_r = r;
+    float raw[4] = { g4, g5, g2, g3 };
+    for (int b = 0; b < 4; b++) {
+        float v = p->volume * raw[b];
+        if (v < 0.0f) v = 0.0f;
+        else if (v > 2.0f) v = 2.0f;
+        out_bus[b] = v;
+    }
 }
 
 static void apply_voice_gains(const cri_player_t *p, cri_voice_t *v) {
-    float pl, pr;
-    compute_player_gains(p, &pl, &pr);
+    float pb[4];
+    compute_player_bus_gains(p, pb);
     float cg = (v->cue_gain > 0.0f) ? v->cue_gain : 1.0f;
     for (int i = 0; i < v->n_cats; i++) {
         cg *= acf_get_cat_effective_gain(v->cat_ids[i]);
     }
     if (cg < 0.0f) cg = 0.0f; else if (cg > 4.0f) cg = 4.0f;
-    v->gain_l = pl * cg;
-    v->gain_r = pr * cg;
+    for (int b = 0; b < 4; b++) {
+        v->bus_gain[b] = pb[b] * cg;
+    }
 }
 
 static void free_voice(cri_voice_t *v) {
@@ -1039,7 +1128,7 @@ static int voice_next_src_frame(cri_voice_t *v, float *out_l, float *out_r) {
     return 1;
 }
 
-static int voice_mix_block(cri_voice_t *v, float *mix_buf, int nframes) {
+static int voice_mix_block(cri_voice_t *v, float mix_bufs[MAX_AUDIO_SINKS][MIX_BLOCK * 2], int num_sinks, int nframes) {
     if (!v->have_pair) {
         if (!voice_next_src_frame(v, &v->prev_l, &v->prev_r)) return 0;
         if (!voice_next_src_frame(v, &v->cur_l, &v->cur_r)) {
@@ -1048,6 +1137,14 @@ static int voice_mix_block(cri_voice_t *v, float *mix_buf, int nframes) {
         }
         v->have_pair = 1;
         v->src_frac_pos = 0.0;
+    }
+
+    float sink_gain[MAX_AUDIO_SINKS] = {0};
+    for (int b = 0; b < 4; b++) {
+        int s = g_bus_sink_idx[b];
+        if (s >= 0 && s < num_sinks && v->bus_gain[b] > sink_gain[s]) {
+            sink_gain[s] = v->bus_gain[b];
+        }
     }
 
     int finished = 0;
@@ -1079,8 +1176,13 @@ static int voice_mix_block(cri_voice_t *v, float *mix_buf, int nframes) {
             }
         }
 
-        mix_buf[f * 2 + 0] += sl * v->gain_l * v->env_gain;
-        mix_buf[f * 2 + 1] += sr * v->gain_r * v->env_gain;
+        for (int s = 0; s < num_sinks; s++) {
+            float g = sink_gain[s] * v->env_gain;
+            if (g > 0.0f) {
+                mix_bufs[s][f * 2 + 0] += sl * g;
+                mix_bufs[s][f * 2 + 1] += sr * g;
+            }
+        }
         v->src_frac_pos += v->src_step;
         v->rendered_out_frames++;
     }
@@ -1102,12 +1204,15 @@ typedef void (*pfn_pa_simple_free)(pa_simple*);
 
 static void *mixer_thread_main(void *arg) {
     (void)arg;
+    load_audio_config_once();
+
     void *pa_lib = dlopen("libpulse-simple.so.0", RTLD_LAZY);
     pfn_pa_simple_new fn_new = pa_lib ? (pfn_pa_simple_new)dlsym(pa_lib, "pa_simple_new") : NULL;
     pfn_pa_simple_write fn_write = pa_lib ? (pfn_pa_simple_write)dlsym(pa_lib, "pa_simple_write") : NULL;
     pfn_pa_simple_free fn_free = pa_lib ? (pfn_pa_simple_free)dlsym(pa_lib, "pa_simple_free") : NULL;
 
-    pa_simple *pa = NULL;
+    pa_simple *pa[MAX_AUDIO_SINKS] = {0};
+    int any_pa = 0;
     if (fn_new && fn_write) {
         cri_pa_sample_spec ss = { 3 /* PA_SAMPLE_S16LE */, MIX_SR, 2 };
         cri_pa_buffer_attr attr = {
@@ -1117,18 +1222,23 @@ static void *mixer_thread_main(void *arg) {
             MIX_BLOCK * 4,     /* ~10.6ms minreq */
             (uint32_t)-1
         };
-        int err = 0;
-        pa = fn_new(NULL, "Sinmai", 1 /* PA_STREAM_PLAYBACK */, NULL, "maimaiDX Audio", &ss, NULL, &attr, &err);
-        if (!pa) {
-            fprintf(stderr, "[CriAudio] pa_simple_new failed err=%d\n", err);
-        } else {
-            fprintf(stderr, "[CriAudio] PulseAudio/PipeWire stream opened 48000Hz stereo\n");
+        for (int s = 0; s < g_num_sinks; s++) {
+            const char *dev = g_sink_devs[s][0] ? g_sink_devs[s] : NULL;
+            int err = 0;
+            pa[s] = fn_new(NULL, "Sinmai", 1 /* PA_STREAM_PLAYBACK */, dev, "maimaiDX Audio", &ss, NULL, &attr, &err);
+            if (!pa[s]) {
+                fprintf(stderr, "[CriAudio] pa_simple_new(dev=%s) failed err=%d\n", dev ? dev : "default", err);
+            } else {
+                any_pa = 1;
+                fprintf(stderr, "[CriAudio] PulseAudio/PipeWire sink[%d] opened: %s (48000Hz stereo)\n",
+                        s, dev ? dev : "default");
+            }
         }
     } else {
         fprintf(stderr, "[CriAudio] libpulse-simple.so.0 unavailable; running silent timing fallback\n");
     }
 
-    float mix_f[MIX_BLOCK * 2];
+    float mix_f[MAX_AUDIO_SINKS][MIX_BLOCK * 2];
     int16_t out_s16[MIX_BLOCK * 2];
 
     while (g_mix_running) {
@@ -1138,7 +1248,7 @@ static void *mixer_thread_main(void *arg) {
         for (int i = 0; i < MAX_VOICES; i++) {
             cri_voice_t *v = &g_voices[i];
             if (!v->active || v->paused) continue;
-            int alive = voice_mix_block(v, mix_f, MIX_BLOCK);
+            int alive = voice_mix_block(v, mix_f, g_num_sinks, MIX_BLOCK);
 
             int pidx = v->player_idx;
             cri_player_t *pl = (pidx >= 0 && pidx < MAX_PLAYERS && g_players[pidx].used) ? &g_players[pidx] : NULL;
@@ -1158,24 +1268,28 @@ static void *mixer_thread_main(void *arg) {
         }
         pthread_mutex_unlock(&g_audio_lock);
 
-        for (int i = 0; i < MIX_BLOCK * 2; i++) {
-            float x = mix_f[i];
-            if (x > 1.0f) x = 1.0f;
-            else if (x < -1.0f) x = -1.0f;
-            out_s16[i] = (int16_t)(x * 32767.0f);
-        }
-
-        if (pa) {
-            int err = 0;
-            if (fn_write(pa, out_s16, sizeof(out_s16), &err) < 0) {
-                usleep(10000);
+        int wrote_any = 0;
+        for (int s = 0; s < g_num_sinks; s++) {
+            if (!pa[s]) continue;
+            for (int i = 0; i < MIX_BLOCK * 2; i++) {
+                float x = mix_f[s][i];
+                if (x > 1.0f) x = 1.0f;
+                else if (x < -1.0f) x = -1.0f;
+                out_s16[i] = (int16_t)(x * 32767.0f);
             }
-        } else {
+            int err = 0;
+            if (fn_write(pa[s], out_s16, sizeof(out_s16), &err) >= 0) {
+                wrote_any = 1;
+            }
+        }
+        if (!any_pa || !wrote_any) {
             usleep((useconds_t)(MIX_BLOCK * 1000000ULL / MIX_SR));
         }
     }
 
-    if (pa && fn_free) fn_free(pa);
+    for (int s = 0; s < g_num_sinks; s++) {
+        if (pa[s] && fn_free) fn_free(pa[s]);
+    }
     if (pa_lib) dlclose(pa_lib);
     return NULL;
 }

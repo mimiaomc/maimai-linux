@@ -10,6 +10,7 @@
 config/net_config.ini
 config/coin_config.ini
 config/LinuxQrFix.ini
+config/audio_config.ini
 
 # Logs and temporary files
 *.log
